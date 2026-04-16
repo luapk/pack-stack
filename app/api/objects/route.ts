@@ -3,35 +3,28 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-const VALID_TYPES = [
-  'football', 'basketball', 'tennis_ball', 'golf_clubs', 'baseball_bat',
-  'sports_bag', 'backpack', 'suitcase', 'books_stack', 'vinyl_record', 'vinyl_stack',
-  'guitar', 'lamp', 'plant_pot', 'coffee_mug', 'wine_bottle',
-  'cardboard_box', 'toy_block', 'shoe', 'cable_bundle', 'picture_frame', 'pillow',
-];
-
-const PROMPT = `Look at this room photo and identify 3 recognisable, characterful objects from the visible clutter. The objects should be distinct from each other (not three of the same type) and represent different categories of mess.
+const PROMPT = `Look at this room photo and identify 3 distinct, recognisable, characterful objects from the visible clutter. Return their bounding boxes so we can crop and silhouette them.
 
 Return ONLY valid JSON, no markdown fences, no prose:
 
 {
   "objects": [
-    {"type": "<one of the valid types>", "color": "#RRGGBB", "label": "short descriptor"},
-    {"type": "<one of the valid types>", "color": "#RRGGBB", "label": "short descriptor"},
-    {"type": "<one of the valid types>", "color": "#RRGGBB", "label": "short descriptor"}
+    {"label": "short name", "bbox": [x, y, w, h], "dominant_color": "#RRGGBB"},
+    {"label": "short name", "bbox": [x, y, w, h], "dominant_color": "#RRGGBB"},
+    {"label": "short name", "bbox": [x, y, w, h], "dominant_color": "#RRGGBB"}
   ]
 }
 
-VALID TYPES (use ONLY these, never invent new ones):
-${VALID_TYPES.join(', ')}
-
 RULES:
-- Pick 3 objects that are actually visible in the photo. If there are records, include vinyl_stack or vinyl_record. If there are books, books_stack. If there's sports gear, pick the specific sport.
-- Variety matters: do not return three books, or three bags. Different categories.
-- Colour should roughly match what you see. For a brown leather bag, use something like #6B4423. For a green plant pot, #3A6B3A. Default to sensible natural tones if you can't tell.
-- label is a short human-readable descriptor like "leather football" or "stack of novels" or "brass table lamp". Maximum 4 words.
-- If the photo has fewer than 3 distinct recognisable categories, repeat a type with different colours rather than returning fewer than 3 objects.
-- Pick objects that would look charming rendered as low-poly 3D, not abstract things like "paperwork" or "clutter".`;
+- bbox is normalized 0-1 coordinates: [0,0] is top-left of the photo, [1,1] is bottom-right. x,y is the top-left corner of the box, w,h are width and height as fractions of the image.
+- Choose objects that are clearly separated from each other in the image, not overlapping.
+- Prefer objects with clear silhouettes against simpler backgrounds (a football on a rug will silhouette better than books lost in a stack).
+- Variety matters: if the room has books, a bag, and a plant, pick those three rather than three books.
+- label is 2-4 words describing what it is ("leather football", "red coffee mug", "potted fern").
+- dominant_color is an approximate hex for the object's main colour, used as fallback shading if silhouette extraction fails.
+- Bounding boxes should be TIGHT to the object's outline, minimal padding.
+- Each bbox should be at least 0.08 wide AND 0.08 tall so there's enough pixels to silhouette. Avoid tiny objects.
+- If there aren't 3 good candidates, still return 3 with your best choices.`;
 
 export async function POST(req: Request) {
   try {
@@ -50,7 +43,7 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 800,
+        max_tokens: 600,
         messages: [{
           role: 'user',
           content: [
@@ -68,27 +61,26 @@ export async function POST(req: Request) {
     const data = await res.json();
     const text = data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
     const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    let objects = (parsed.objects || []).filter((o: any) => VALID_TYPES.includes(o.type));
+    let objects = (parsed.objects || []).filter((o: any) =>
+      o.bbox && Array.isArray(o.bbox) && o.bbox.length === 4
+    ).slice(0, 3);
 
-    // Fallback: if Claude returned fewer than 3 valid objects, pad with defaults
-    const defaults = [
-      { type: 'cardboard_box', color: '#B5956E', label: 'generic box' },
-      { type: 'books_stack',   color: '#8B0000', label: 'books' },
-      { type: 'coffee_mug',    color: '#F5F1E8', label: 'mug' },
-    ];
     while (objects.length < 3) {
-      objects.push(defaults[objects.length]);
+      objects.push({
+        label: 'item',
+        bbox: [0.3 + objects.length * 0.2, 0.4, 0.15, 0.2],
+        dominant_color: '#8B6F4E',
+      });
     }
-    objects = objects.slice(0, 3);
 
     return NextResponse.json({ objects });
   } catch (e: any) {
     return NextResponse.json({
       error: e.message,
       objects: [
-        { type: 'cardboard_box', color: '#B5956E', label: 'box' },
-        { type: 'books_stack',   color: '#8B0000', label: 'books' },
-        { type: 'coffee_mug',    color: '#F5F1E8', label: 'mug' },
+        { label: 'item 1', bbox: [0.1, 0.4, 0.2, 0.3], dominant_color: '#8B6F4E' },
+        { label: 'item 2', bbox: [0.4, 0.4, 0.2, 0.3], dominant_color: '#8B0000' },
+        { label: 'item 3', bbox: [0.7, 0.4, 0.2, 0.3], dominant_color: '#2A4A6B' },
       ],
     }, { status: 200 });
   }

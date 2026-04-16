@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { CATALOGUE, solveLayout, snapToRatio, Scene, Layout } from '@/lib/catalogue';
 import HotspotImage from './components/HotspotImage';
-import ObjectShowcase, { DetectedObject } from './components/ObjectShowcase';
+import SilhouetteShowcase, { DetectedObject } from './components/SilhouetteShowcase';
 import CameraCapture from './components/CameraCapture';
 
 type Stage = 'upload' | 'camera' | 'analysing' | 'rendering' | 'scanning' | 'results' | 'error';
@@ -58,7 +58,6 @@ export default function Page() {
       setStage('analysing');
       setProgress('Reading the room…');
 
-      // Fire scene + objects in parallel
       const [sceneRes, objectsRes] = await Promise.all([
         fetch('/api/analyse', {
           method: 'POST',
@@ -79,7 +78,6 @@ export default function Page() {
       const l = solveLayout(s);
       setLayout(l);
 
-      // Objects are non-critical — fall back silently if fetch fails
       try {
         const objData = await objectsRes.json();
         if (objData.objects) setDetectedObjects(objData.objects);
@@ -154,7 +152,7 @@ export default function Page() {
       <header className="border-b-2 border-black sticky top-0 z-30" style={{ background: '#F5F1E8' }}>
         <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-3 min-w-0">
-            <span className="f-mono text-[10px] tracking-widest shrink-0" style={{ color: '#0051BA' }}>v0.7</span>
+            <span className="f-mono text-[10px] tracking-widest shrink-0" style={{ color: '#0051BA' }}>v0.8</span>
             <span className="f-display italic text-xl sm:text-2xl leading-none truncate">IKEA My Space</span>
           </div>
           <div className="flex items-center gap-2">
@@ -183,7 +181,7 @@ export default function Page() {
                 concept back.
               </h1>
               <p className="f-mono text-xs leading-relaxed opacity-80 mb-6 max-w-md">
-                Claude Vision reads your room and roasts it. A deterministic solver picks real IKEA storage. Nano Banana 2 renders the same space, reorganized, in your photo's aspect ratio. Hover any product hotspot for details.
+                Claude Vision reads your room and roasts it. A deterministic solver picks real IKEA storage. Nano Banana 2 renders the same space, reorganized. Three objects from the photo are traced and extruded into 2.5D while you wait.
               </p>
               <ul className="f-mono text-[11px] space-y-1 opacity-70 mb-6">
                 <li>→ Works best on a single wall or corner shot</li>
@@ -271,10 +269,9 @@ export default function Page() {
               </div>
             </div>
 
-            {/* Object showcase appears as soon as objects data arrives */}
-            {detectedObjects.length > 0 && (stage === 'rendering' || stage === 'scanning') && (
+            {imgUrl && detectedObjects.length > 0 && (stage === 'rendering' || stage === 'scanning') && (
               <div className="max-w-3xl mx-auto">
-                <ObjectShowcase objects={detectedObjects}/>
+                <SilhouetteShowcase imageUrl={imgUrl} objects={detectedObjects}/>
               </div>
             )}
           </div>
