@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { CATALOGUE, solveLayout, snapToRatio, Scene, Layout } from '@/lib/catalogue';
 import HotspotImage from './components/HotspotImage';
-import RoomModel, { Architecture } from './components/RoomModel';
+import ObjectShowcase, { DetectedObject } from './components/ObjectShowcase';
 import CameraCapture from './components/CameraCapture';
 
 type Stage = 'upload' | 'camera' | 'analysing' | 'rendering' | 'scanning' | 'results' | 'error';
@@ -16,7 +16,7 @@ export default function Page() {
   const [imgData, setImgData] = useState<{ base64: string; mediaType: string } | null>(null);
   const [ratio, setRatio] = useState<Ratio>({ name: '4:3', value: 4/3, css: '4 / 3' });
   const [scene, setScene] = useState<Scene | null>(null);
-  const [architecture, setArchitecture] = useState<Architecture | null>(null);
+  const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [rendered, setRendered] = useState<{ url: string; base64: string; mediaType: string } | null>(null);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
@@ -53,19 +53,19 @@ export default function Page() {
   const run = async () => {
     if (!imgData) return;
     setErrMsg('');
-    setArchitecture(null);
+    setDetectedObjects([]);
     try {
       setStage('analysing');
       setProgress('Reading the room…');
 
-      // Fire scene + architecture in parallel
-      const [sceneRes, archRes] = await Promise.all([
+      // Fire scene + objects in parallel
+      const [sceneRes, objectsRes] = await Promise.all([
         fetch('/api/analyse', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(imgData),
         }),
-        fetch('/api/architecture', {
+        fetch('/api/objects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(imgData),
@@ -79,12 +79,10 @@ export default function Page() {
       const l = solveLayout(s);
       setLayout(l);
 
-      // Architecture is non-critical — if it fails, we just don't show the 3D
+      // Objects are non-critical — fall back silently if fetch fails
       try {
-        const archData = await archRes.json();
-        if (archRes.ok && archData.architecture) {
-          setArchitecture(archData.architecture);
-        }
+        const objData = await objectsRes.json();
+        if (objData.objects) setDetectedObjects(objData.objects);
       } catch {}
 
       setStage('rendering');
@@ -134,7 +132,7 @@ export default function Page() {
 
   const reset = () => {
     setStage('upload'); setImgUrl(null); setImgData(null); setScene(null);
-    setArchitecture(null); setLayout(null); setRendered(null); setHotspots([]);
+    setDetectedObjects([]); setLayout(null); setRendered(null); setHotspots([]);
     setActiveHotspot(null); setErrMsg(''); setProgress('');
   };
 
@@ -156,7 +154,7 @@ export default function Page() {
       <header className="border-b-2 border-black sticky top-0 z-30" style={{ background: '#F5F1E8' }}>
         <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-3 min-w-0">
-            <span className="f-mono text-[10px] tracking-widest shrink-0" style={{ color: '#0051BA' }}>v0.6</span>
+            <span className="f-mono text-[10px] tracking-widest shrink-0" style={{ color: '#0051BA' }}>v0.7</span>
             <span className="f-display italic text-xl sm:text-2xl leading-none truncate">IKEA My Space</span>
           </div>
           <div className="flex items-center gap-2">
@@ -176,7 +174,6 @@ export default function Page() {
 
       <main className="max-w-6xl mx-auto px-5 py-8">
 
-        {/* UPLOAD stage */}
         {stage === 'upload' && (
           <div className="grid md:grid-cols-2 gap-8 items-start">
             <div>
@@ -186,7 +183,7 @@ export default function Page() {
                 concept back.
               </h1>
               <p className="f-mono text-xs leading-relaxed opacity-80 mb-6 max-w-md">
-                Claude Vision reads your room and roasts it. A deterministic solver picks real IKEA storage. Nano Banana 2 renders the same space, reorganized, in your photo's aspect ratio. A 3D architectural model builds in real time while you wait.
+                Claude Vision reads your room and roasts it. A deterministic solver picks real IKEA storage. Nano Banana 2 renders the same space, reorganized, in your photo's aspect ratio. Hover any product hotspot for details.
               </p>
               <ul className="f-mono text-[11px] space-y-1 opacity-70 mb-6">
                 <li>→ Works best on a single wall or corner shot</li>
@@ -240,7 +237,6 @@ export default function Page() {
           </div>
         )}
 
-        {/* CAMERA stage */}
         {stage === 'camera' && (
           <div className="max-w-xl mx-auto">
             <div className="mb-4">
@@ -256,7 +252,6 @@ export default function Page() {
           </div>
         )}
 
-        {/* ANALYSING / RENDERING / SCANNING — with 3D model during render */}
         {(stage === 'analysing' || stage === 'rendering' || stage === 'scanning') && (
           <div>
             <div className="text-center mb-8">
@@ -276,13 +271,10 @@ export default function Page() {
               </div>
             </div>
 
-            {/* 3D room model appears as soon as architecture arrives */}
-            {architecture && (stage === 'rendering' || stage === 'scanning') && (
+            {/* Object showcase appears as soon as objects data arrives */}
+            {detectedObjects.length > 0 && (stage === 'rendering' || stage === 'scanning') && (
               <div className="max-w-3xl mx-auto">
-                <RoomModel architecture={architecture} aspectRatio={ratio.css}/>
-                <p className="f-mono text-[10px] opacity-60 mt-2 text-center">
-                  Procedural reconstruction from detected architectural features. Wall dimensions, door and window positions, fixtures.
-                </p>
+                <ObjectShowcase objects={detectedObjects}/>
               </div>
             )}
           </div>
@@ -296,7 +288,6 @@ export default function Page() {
           </div>
         )}
 
-        {/* RESULTS */}
         {stage === 'results' && scene && layout && (
           <div className="space-y-8">
             <div className="border-2 border-black bg-white">
@@ -350,19 +341,8 @@ export default function Page() {
               )}
             </section>
 
-            {/* Architecture model persists in results too */}
-            {architecture && (
-              <section>
-                <SectionTitle n="04" title="3D model"/>
-                <RoomModel architecture={architecture} aspectRatio={ratio.css}/>
-                <div className="f-mono text-[10px] opacity-60 mt-2">
-                  Architectural reconstruction: walls, doors, windows, fixtures. Objects excluded.
-                </div>
-              </section>
-            )}
-
             <section>
-              <SectionTitle n={architecture ? '05' : '04'} title="what's in the room"/>
+              <SectionTitle n="04" title="what's in the room"/>
               <div className="border-2 border-black bg-white p-5">
                 <table className="w-full f-mono text-xs">
                   <tbody>
@@ -379,7 +359,7 @@ export default function Page() {
             </section>
 
             <section>
-              <SectionTitle n={architecture ? '06' : '05'} title="shopping list"/>
+              <SectionTitle n="05" title="shopping list"/>
               <div className="border-2 border-black bg-white overflow-x-auto">
                 <table className="w-full f-mono text-xs">
                   <thead>
